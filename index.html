@@ -334,7 +334,11 @@
     const token = document.getElementById('token').value.trim();
     const errBox = document.getElementById('setup-error');
     errBox.style.display = 'none';
-    if(!owner || !repo || !token){ errBox.textContent = 'Bitte alle drei Felder ausfüllen.'; errBox.style.display = 'block'; return; }
+    if(!owner || !repo || !token){ 
+      errBox.textContent = 'Bitte alle drei Felder ausfüllen.'; 
+      errBox.style.display = 'block'; 
+      return; 
+    }
     localStorage.setItem(LS_KEYS.owner, owner);
     localStorage.setItem(LS_KEYS.repo, repo);
     localStorage.setItem(LS_KEYS.token, token);
@@ -365,34 +369,51 @@
     setTimeout(() => badge.style.opacity = 0, 1800);
   }
 
+  // Hilfsfunktion zur fehlerfreien Base64-Dekodierung von UTF-8
+  function decodeBase64Utf8(b64) {
+    const binString = atob(b64.replace(/\n/g, ''));
+    const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0));
+    return new TextDecoder().decode(bytes);
+  }
+
   async function fetchJsonFromRepo(owner, repo, token, path){
     const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
-      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' }
+      headers: { 
+        'Authorization': `Bearer ${token}`, 
+        'Accept': 'application/vnd.github+json' 
+      }
     });
     if(!res.ok){
-      if(res.status === 401 || res.status === 403) throw new Error('Zugriff verweigert — prüfe dein Token.');
+      if(res.status === 401 || res.status === 403) throw new Error('Zugriff verweigert (401/403) — bitte Token, Benutzername und Repo-Name prüfen.');
       if(res.status === 404) return null;
-      throw new Error('Unerwartete Antwort von GitHub (Status ' + res.status + ').');
+      throw new Error('Fehler bei GitHub-Anfrage (Status ' + res.status + ').');
     }
     const meta = await res.json();
-    const decoded = decodeURIComponent(escape(atob(meta.content.replace(/\n/g, ''))));
+    const decoded = decodeBase64Utf8(meta.content);
     return JSON.parse(decoded);
   }
 
   async function fetchTextFromRepo(owner, repo, token, path){
     const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
-      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' }
+      headers: { 
+        'Authorization': `Bearer ${token}`, 
+        'Accept': 'application/vnd.github+json' 
+      }
     });
     if(!res.ok) return null;
     const meta = await res.json();
-    return decodeURIComponent(escape(atob(meta.content.replace(/\n/g, ''))));
+    return decodeBase64Utf8(meta.content);
   }
 
   async function loadData(){
     const owner = localStorage.getItem(LS_KEYS.owner);
     const repo = localStorage.getItem(LS_KEYS.repo);
     const token = localStorage.getItem(LS_KEYS.token);
-    if(!owner || !repo || !token) return;
+    if(!owner || !repo || !token) {
+      document.getElementById('dashboard').style.display = 'none';
+      document.getElementById('setup').style.display = 'block';
+      return;
+    }
     document.getElementById('last-sync').textContent = 'Synchronisiere…';
     try{
       const activities = await fetchJsonFromRepo(owner, repo, token, 'data/activities.json') || [];
@@ -421,7 +442,6 @@
       .filter(h => h.value != null)
       .sort((a,b) => new Date(a.date) - new Date(b.date));
 
-    // Falls noch keine Historie existiert, wenigstens den aktuellen Wert als Punkt zeigen
     if(points.length === 0 && status && status.vo2max && status.vo2max.value != null){
       points = [{ date: new Date().toISOString(), value: status.vo2max.value }];
     }
@@ -539,7 +559,6 @@
     }
   }
 
-  // Gemeinsame Zonenberechnung (Karvonen), wiederverwendet für HF-Zonen und Belastungsratio
   function calcZoneModel(activities, health){
     const restingValues = (health || []).map(h => h.resting_hr).filter(v => v != null);
     const restingHr = restingValues.length ? restingValues.reduce((a,b)=>a+b,0) / restingValues.length : null;
@@ -591,7 +610,7 @@
           <div class="zone-bar-track"><div class="zone-bar-fill" style="width:${pct}%; background:${z.color};"></div></div>
           <div class="zone-pct">${pct}%</div>
         </div>`;
-    }).join('') + `<div class="zone-note">Berechnet aus Ø-Ruhepuls (${Math.round(restingHr)} bpm) und höchstem beobachteten Puls (${maxHr} bpm) nach der Karvonen-Formel. Basiert auf dem Ø-Puls je Aktivität, nicht auf sekundengenauen Daten.</div>`;
+    }).join('') + `<div class="zone-note">Berechnet aus Ø-Ruhepuls (${Math.round(restingHr)} bpm) und höchstem beobachteten Puls (${maxHr} bpm) nach der Karvonen-Formel.</div>`;
   }
 
   function renderLoadRatio(activities){
@@ -605,9 +624,9 @@
       ringL.style.strokeDasharray = RING_CIRC; ringL.style.strokeDashoffset = RING_CIRC; ringL.style.stroke = 'var(--track)';
       return;
     }
-    // Grobe Zonen-Schätzung nur aus Aktivitäten (ohne Gesundheitsdaten) für die Lastberechnung
+
     const maxHr = Math.max(...withHr.map(a => a.max_hr || a.avg_hr));
-    const restingApprox = Math.min(...withHr.map(a => a.avg_hr)) * 0.75; // grobe Näherung falls kein Ruhepuls verfügbar
+    const restingApprox = Math.min(...withHr.map(a => a.avg_hr)) * 0.75;
     const hrr = maxHr - restingApprox;
     const zoneOf = hr => {
       const p = (hr - restingApprox) / hrr;
@@ -620,7 +639,7 @@
       .reduce((s,a) => s + a.duration_min * zoneOf(a.avg_hr), 0);
 
     const acute = sumLoad(7);
-    const chronic = sumLoad(28) / 4; // auf vergleichbare Wochenbasis bringen
+    const chronic = sumLoad(28) / 4;
 
     if(chronic === 0){
       pctEl.textContent = '—'; statusEl.textContent = 'Noch nicht genug Verlauf';
@@ -710,7 +729,11 @@
     if(owner && repo && token){
       document.getElementById('owner').value = owner;
       document.getElementById('repo').value = repo;
+      document.getElementById('token').value = token;
       showDashboard();
+    } else {
+      document.getElementById('setup').style.display = 'block';
+      document.getElementById('dashboard').style.display = 'none';
     }
   })();
 </script>
